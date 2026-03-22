@@ -7,6 +7,11 @@ const app = express();
 app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '10mb' }));
 
+if (!process.env.SUPABASE_URL || !process.env.SUPABASE_KEY) {
+  console.error('❌ Faltan SUPABASE_URL o SUPABASE_KEY en las variables de entorno');
+  process.exit(1);
+}
+
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_KEY
@@ -18,7 +23,7 @@ app.get('/', (_, res) => res.json({ status: 'ok', service: 'Dulce Rosa API 🌸'
 app.get('/citas', async (req, res) => {
   const { data, error } = await supabase.from('citas').select('*').order('fecha').order('hora');
   if (error) return res.status(500).json({ error: error.message });
-  res.json(data);
+  res.json(data || []);
 });
 
 app.post('/citas', async (req, res) => {
@@ -72,7 +77,7 @@ app.post('/slots/:fecha/set', async (req, res) => {
 app.get('/galeria', async (req, res) => {
   const { data, error } = await supabase.from('galeria').select('*').order('orden');
   if (error) return res.status(500).json({ error: error.message });
-  res.json(data);
+  res.json(data || []);
 });
 
 app.post('/galeria', async (req, res) => {
@@ -99,18 +104,32 @@ app.post('/config/:key', async (req, res) => {
   res.json({ ok: true });
 });
 
-const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => console.log(`🌸 Dulce Rosa API en puerto ${PORT}`));
-
 // ── PROMOCIONES ──
 app.get('/promociones', async (req, res) => {
-  const { data, error } = await supabase.from('promociones').select('*').eq('activa', true).order('creado', { ascending: false });
+  const { data, error } = await supabase
+    .from('promociones')
+    .select('*')
+    .eq('activa', true)
+    .order('creado', { ascending: false });
   if (error) return res.status(500).json({ error: error.message });
   res.json(data || []);
 });
 
 app.post('/promociones', async (req, res) => {
-  const { data, error } = await supabase.from('promociones').insert([{ ...req.body, activa: true }]).select();
+  const { data, error } = await supabase
+    .from('promociones')
+    .insert([{ ...req.body, activa: true }])
+    .select();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data[0]);
+});
+
+app.patch('/promociones/:id', async (req, res) => {
+  const { data, error } = await supabase
+    .from('promociones')
+    .update(req.body)
+    .eq('id', req.params.id)
+    .select();
   if (error) return res.status(500).json({ error: error.message });
   res.json(data[0]);
 });
@@ -132,13 +151,20 @@ app.get('/resenas', async (req, res) => {
 });
 
 app.post('/resenas', async (req, res) => {
-  const { data, error } = await supabase.from('resenas').insert([{ ...req.body, aprobada: false }]).select();
+  const { data, error } = await supabase
+    .from('resenas')
+    .insert([{ ...req.body, aprobada: false }])
+    .select();
   if (error) return res.status(500).json({ error: error.message });
   res.json(data[0]);
 });
 
 app.patch('/resenas/:id', async (req, res) => {
-  const { data, error } = await supabase.from('resenas').update(req.body).eq('id', req.params.id).select();
+  const { data, error } = await supabase
+    .from('resenas')
+    .update(req.body)
+    .eq('id', req.params.id)
+    .select();
   if (error) return res.status(500).json({ error: error.message });
   res.json(data[0]);
 });
@@ -148,3 +174,6 @@ app.delete('/resenas/:id', async (req, res) => {
   if (error) return res.status(500).json({ error: error.message });
   res.json({ ok: true });
 });
+
+const PORT = process.env.PORT || 3001;
+app.listen(PORT, () => console.log(`🌸 Dulce Rosa API en puerto ${PORT}`));
