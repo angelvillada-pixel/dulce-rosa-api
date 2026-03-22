@@ -101,3 +101,50 @@ app.post('/config/:key', async (req, res) => {
 
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => console.log(`🌸 Dulce Rosa API en puerto ${PORT}`));
+
+// ── PROMOCIONES ──
+app.get('/promociones', async (req, res) => {
+  const { data, error } = await supabase.from('promociones').select('*').eq('activa', true).order('creado', { ascending: false });
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data || []);
+});
+
+app.post('/promociones', async (req, res) => {
+  const { data, error } = await supabase.from('promociones').insert([{ ...req.body, activa: true }]).select();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data[0]);
+});
+
+app.delete('/promociones/:id', async (req, res) => {
+  const { error } = await supabase.from('promociones').delete().eq('id', req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ ok: true });
+});
+
+// ── RESEÑAS ──
+app.get('/resenas', async (req, res) => {
+  const aprobada = req.query.aprobada;
+  let q = supabase.from('resenas').select('*').order('creado', { ascending: false });
+  if (aprobada !== undefined) q = q.eq('aprobada', aprobada === 'true');
+  const { data, error } = await q;
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data || []);
+});
+
+app.post('/resenas', async (req, res) => {
+  const { data, error } = await supabase.from('resenas').insert([{ ...req.body, aprobada: false }]).select();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data[0]);
+});
+
+app.patch('/resenas/:id', async (req, res) => {
+  const { data, error } = await supabase.from('resenas').update(req.body).eq('id', req.params.id).select();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data[0]);
+});
+
+app.delete('/resenas/:id', async (req, res) => {
+  const { error } = await supabase.from('resenas').delete().eq('id', req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ ok: true });
+});
