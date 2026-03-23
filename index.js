@@ -101,6 +101,15 @@ app.get('/', (_req, res) => {
   res.json({ status: 'ok', service: 'Dulce Rosa API' });
 });
 
+app.get('/health', (_req, res) => {
+  res.json({
+    status: 'ok',
+    service: 'Dulce Rosa API',
+    time: new Date().toISOString(),
+    uptimeSeconds: Math.round(process.uptime()),
+  });
+});
+
 app.get(
   '/citas',
   asyncHandler(async (_req, res) => {
