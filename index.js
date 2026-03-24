@@ -1,7 +1,19 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const multer = require('multer');
 const { createClient } = require('@supabase/supabase-js');
+const { requireAdminAuth } = require('./auth');
+const {
+  ALLOWED_MIME_TYPES,
+  LOCAL_MEDIA_BASE_PATH,
+  LOCAL_MEDIA_ROOT,
+  MAX_UPLOAD_BYTES,
+  STORAGE_PROVIDER,
+  deleteImage,
+  getStorageHealth,
+  uploadImage,
+} = require('./storage');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -25,6 +37,9 @@ app.use(
   }),
 );
 app.use(express.json({ limit: '10mb' }));
+if (STORAGE_PROVIDER === 'filesystem') {
+  app.use(LOCAL_MEDIA_BASE_PATH, express.static(LOCAL_MEDIA_ROOT, { maxAge: '1y', immutable: true }));
+}
 
 if (!process.env.SUPABASE_URL || !process.env.SUPABASE_KEY) {
   console.error('Missing SUPABASE_URL or SUPABASE_KEY');
@@ -32,6 +47,17 @@ if (!process.env.SUPABASE_URL || !process.env.SUPABASE_KEY) {
 }
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_UPLOAD_BYTES },
+  fileFilter(_req, file, callback) {
+    if (!ALLOWED_MIME_TYPES.has(file.mimetype)) {
+      callback(new Error('Solo se permiten imagenes JPG, PNG o WebP.'));
+      return;
+    }
+    callback(null, true);
+  },
+});
 
 function asyncHandler(handler) {
   return (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
@@ -99,6 +125,44 @@ async function setArr(key, arr) {
   if (error) throw error;
 }
 
+async function getObj(key) {
+  const { data, error } = await supabase.from('config').select('value').eq('key', key).single();
+  if (error && error.code !== 'PGRST116') throw error;
+  return data?.value && typeof data.value === 'object' && !Array.isArray(data.value) ? data.value : {};
+}
+
+async function setObj(key, value) {
+  const { error } = await supabase.from('config').upsert({ key, value }, { onConflict: 'key' });
+  if (error) throw error;
+}
+
+async function getMediaMeta() {
+  return getObj('media_meta');
+}
+
+async function saveMediaMeta(entry) {
+  const meta = await getMediaMeta();
+  meta[entry.key] = entry;
+  await setObj('media_meta', meta);
+}
+
+async function removeMediaMeta(target) {
+  if (!target) return null;
+
+  const meta = await getMediaMeta();
+  let resolvedKey = target;
+  if (!meta[resolvedKey]) {
+    const found = Object.entries(meta).find(([, item]) => item?.url === target);
+    resolvedKey = found?.[0] || '';
+  }
+
+  if (!resolvedKey || !meta[resolvedKey]) return null;
+  const removed = meta[resolvedKey];
+  delete meta[resolvedKey];
+  await setObj('media_meta', meta);
+  return removed;
+}
+
 app.get('/', (_req, res) => {
   res.json({ status: 'ok', service: 'Dulce Rosa API' });
 });
@@ -109,8 +173,52 @@ app.get('/health', (_req, res) => {
     service: 'Dulce Rosa API',
     time: new Date().toISOString(),
     uptimeSeconds: Math.round(process.uptime()),
+    storage: getStorageHealth(),
   });
 });
+
+app.post(
+  '/media/upload',
+  requireAdminAuth,
+  upload.single('file'),
+  asyncHandler(async (req, res) => {
+    if (!req.file) return badRequest(res, 'Debes enviar una imagen.');
+
+    const folder = normalizeText(req.body?.folder, 40) || 'general';
+    const originalName = normalizeText(req.body?.filename || req.file.originalname, 120) || req.file.originalname;
+
+    const uploaded = await uploadImage({
+      folder,
+      originalName,
+      mimeType: req.file.mimetype,
+      size: req.file.size,
+      buffer: req.file.buffer,
+    });
+
+    await saveMediaMeta(uploaded);
+    return res.json(uploaded);
+  }),
+);
+
+app.delete(
+  '/media',
+  requireAdminAuth,
+  asyncHandler(async (req, res) => {
+    const target = normalizeText(req.body?.key || req.body?.url, 400);
+    if (!target) return badRequest(res, 'Debes indicar la imagen a eliminar.');
+
+    const removed = await removeMediaMeta(target);
+    if (removed?.key) {
+      try {
+        await deleteImage(removed.key);
+      } catch (error) {
+        console.warn('No se pudo eliminar el objeto del storage:', error?.message || error);
+      }
+    }
+
+    return res.json({ ok: true, removed: removed?.key || null });
+  }),
+);
 
 app.get(
   '/citas',
@@ -405,6 +513,20 @@ app.delete(
 app.use((error, _req, res, _next) => {
   if (error?.message === 'Origin not allowed') {
     res.status(403).json({ error: 'Origin not allowed' });
+    return;
+  }
+
+  if (error instanceof multer.MulterError) {
+    if (error.code === 'LIMIT_FILE_SIZE') {
+      res.status(400).json({ error: 'La imagen supera el limite de 5 MB.' });
+      return;
+    }
+    res.status(400).json({ error: error.message || 'No se pudo procesar la imagen.' });
+    return;
+  }
+
+  if (error?.status) {
+    res.status(error.status).json({ error: error.message || 'Solicitud invalida.' });
     return;
   }
 
