@@ -1,7 +1,13 @@
 const { createRemoteJWKSet, jwtVerify } = require('jose');
 
 const FIREBASE_PROJECT_ID = process.env.FIREBASE_PROJECT_ID || 'dulce-rosa';
-const FIREBASE_ADMIN_EMAIL = (process.env.FIREBASE_ADMIN_EMAIL || 'dulcerosa794@gmail.com').toLowerCase();
+const DEFAULT_ADMIN_EMAILS = ['dulcerosa794@gmail.com', 'ducerosa794@gmail.com'];
+const configuredEmails = String(process.env.FIREBASE_ADMIN_EMAILS || process.env.FIREBASE_ADMIN_EMAIL || '')
+  .split(',')
+  .map((item) => item.trim().toLowerCase())
+  .filter(Boolean);
+const ADMIN_EMAILS = new Set(configuredEmails.length ? configuredEmails : DEFAULT_ADMIN_EMAILS);
+const FIREBASE_ADMIN_EMAIL = [...ADMIN_EMAILS][0] || 'dulcerosa794@gmail.com';
 const ADMIN_AUTH_BYPASS = process.env.ADMIN_AUTH_BYPASS === 'true';
 const JWKS = createRemoteJWKSet(new URL('https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com'));
 
@@ -23,7 +29,7 @@ async function verifyFirebaseToken(token) {
     audience: FIREBASE_PROJECT_ID,
   });
 
-  if (!payload?.email || String(payload.email).toLowerCase() !== FIREBASE_ADMIN_EMAIL) {
+  if (!payload?.email || !ADMIN_EMAILS.has(String(payload.email).trim().toLowerCase())) {
     const error = new Error('La cuenta autenticada no tiene permisos de admin.');
     error.status = 403;
     throw error;
@@ -49,6 +55,7 @@ async function requireAdminAuth(req, _res, next) {
 }
 
 module.exports = {
+  ADMIN_EMAILS,
   FIREBASE_ADMIN_EMAIL,
   FIREBASE_PROJECT_ID,
   requireAdminAuth,
